@@ -10,8 +10,7 @@ from train_utils import set_seeds, tf_gpu_cleanup, tf_gpu_memory_summary, run_tr
 
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", type=str, default=CFG.data.dataset, choices=["coco-2017","coco-vn","ktvic"],
-                    help="Chọn dataset: coco-2017 | coco-vn | ktvic")
+    ap.add_argument("--dataset", type=str, default=CFG.data.dataset, choices=["coco-vi-human","coco-vi-human2","ktvic"])
     ap.add_argument("--batch_size", type=int, default=CFG.train.batch_size)
     ap.add_argument("--epochs", type=int, default=CFG.train.num_epochs)
     ap.add_argument("--acc_steps", type=int, default=CFG.train.acc_steps)

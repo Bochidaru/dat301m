@@ -16,54 +16,26 @@ def preprocess_caption(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
-def load_coco_data(input_directory: str, split: str) -> pd.DataFrame:
-    if split == "train":
-        images_dir = os.path.join(input_directory, "train2017")
-        annotations_path = os.path.join(input_directory, "annotations/captions_train2017.json")
-    elif split == "val":
-        images_dir = os.path.join(input_directory, "val2017")
-        annotations_path = os.path.join(input_directory, "annotations/captions_val2017.json")
-    else:
-        raise ValueError("split phải là 'train' hoặc 'val'")
+def load_vi_human_from_json(json_path: str, image_root: str) -> pd.DataFrame:
+    with open(json_path, "r", encoding="utf-8") as f:
+        data: dict = json.load(f)
 
-    coco = COCO(annotations_path)
-    data = []
-    for image_id in coco.getImgIds():
-        img_info_list = coco.loadImgs(image_id)
-        for img_info in img_info_list:
-            img_path = f"{images_dir}/{img_info['file_name']}"
-            ann_ids = coco.getAnnIds(imgIds=image_id)
-            for ann in coco.loadAnns(ann_ids):
-                caption = f"<s> {preprocess_caption(ann['caption'])}</s>"
-                data.append({"image": img_path, "caption": caption, "language": "en"})
-    return pd.DataFrame(data)
-
-def load_vietnamese_coco_dataset(caption_path: str, base_image_path: str) -> pd.DataFrame:
-    dataset_info = [
-        ("captions_train2017_trans.json", os.path.join(base_image_path, "train2017")),
-        ("captions_val2017_trans.json",   os.path.join(base_image_path, "val2017")),
-    ]
     records = []
-    for caption_file_name, image_dir in dataset_info:
-        caption_file = os.path.join(caption_path, caption_file_name)
-        if not os.path.exists(caption_file):
-            continue
-        with open(caption_file, 'r', encoding="utf-8") as f:
-            data = json.load(f)
-
-        annotations = data.get("annotations", [])
-        image_id_to_file = {
-            int(f.split('.')[0]): os.path.join(image_dir, f)
-            for f in os.listdir(image_dir) if f.endswith('.jpg')
-        }
-        for ann in annotations:
-            image_id = ann["image_id"]
-            caption  = preprocess_caption(ann["caption"])
-            if image_id in image_id_to_file:
-                records.append({"image": image_id_to_file[image_id],
-                                "caption": caption,
-                                "language": "vi"})
-    return pd.DataFrame(records)
+    for url, entry in data.items():
+        filename = os.path.basename(url)
+        img_path = os.path.join(image_root, filename)
+        captions = entry.get("vietnamese", []) or []
+        cleaned_caps = [preprocess_caption(c) for c in captions if isinstance(c, str) and c.strip()]
+        for cap in cleaned_caps:
+            records.append({
+                "image": img_path,
+                "caption": cap,
+                "language": "vi"
+            })
+    df = pd.DataFrame(records)
+    if not df.empty:
+        df = df[df["image"].apply(os.path.exists)].reset_index(drop=True)
+    return df
 
 def load_ktvic_data(input_directory: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     train_path = os.path.join(input_directory, "ktvic_dataset/train_data.json")
@@ -98,14 +70,16 @@ def load_ktvic_data(input_directory: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return df_train, df_test
 
 def load_data(dataset_type: str):
-    if dataset_type == "coco-2017":
-        return (load_coco_data(CFG.data.coco2017_root, split="train"),
-                load_coco_data(CFG.data.coco2017_root, split="val"))
-    if dataset_type == "coco-vn":
-        return load_vietnamese_coco_dataset(CFG.data.coco_vn_caption_root,
-                                            CFG.data.coco2017_root)
     if dataset_type == "ktvic":
-        return load_ktvic_data(CFG.data.ktvic_root)
+        return load_ktvic_data(input_directory="/ktvic-dataset")
+    if dataset_type == "coco-vi-human":
+        json_path  = "caption-vi/vietnamese_human_part2_edited_edited_filtered.json"
+        image_root = "coco-vi/img_folders"
+        return load_vi_human_from_json(json_path, image_root)
+    if dataset_type == "coco-vi-human2":
+        json_path  = "caption2/vietnamese_human_edited.json"
+        image_root = "img-folder2/img_folders"
+        return load_vi_human_from_json(json_path, image_root)
     raise ValueError(f"Unknown dataset_type: {dataset_type}")
 
 def image_transform_fn(image: Image.Image, image_size: int,
@@ -161,24 +135,17 @@ def make_val_ds(df_grouped: pd.DataFrame, tokenizer: T5Tokenizer,
 
 def build_loaders(dataset_type: str, tokenizer: T5Tokenizer,
                   image_size: int, max_length: int, batch_size: int):
-    if dataset_type == "coco-vn":
-        coco_vn = load_data("coco-vn")
-        unique_images = coco_vn["image"].unique()
+    if dataset_type in ("coco-vi-human", "coco-vi-human2"):
+        coco_vi = load_data(dataset_type)
+        unique_images = coco_vi["image"].unique()
         train_img_paths, val_img_paths = train_test_split(
             unique_images, test_size=CFG.data.val_ratio_by_image, random_state=42)
-        train_df = coco_vn[coco_vn["image"].isin(train_img_paths)].reset_index(drop=True)
-        val_df_raw = coco_vn[coco_vn["image"].isin(val_img_paths)].reset_index(drop=True)
+        train_df = coco_vi[coco_vi["image"].isin(train_img_paths)].reset_index(drop=True)
+        val_df_raw = coco_vi[coco_vi["image"].isin(val_img_paths)].reset_index(drop=True)
         val_df = group_captions(val_df_raw)
         train_loader = make_train_ds(train_df, tokenizer, image_size, max_length, batch_size)
         val_loader   = make_val_ds(val_df, tokenizer, image_size, max_length, batch_size)
         return train_df, val_df, train_loader, val_loader
-
-    if dataset_type == "coco-2017":
-        train_df, val_df = load_data("coco-2017") 
-        val_df_grouped = group_captions(val_df)
-        train_loader = make_train_ds(train_df, tokenizer, image_size, max_length, batch_size)
-        val_loader   = make_val_ds(val_df_grouped, tokenizer, image_size, max_length, batch_size)
-        return train_df, val_df_grouped, train_loader, val_loader
 
     if dataset_type == "ktvic":
         train_df, test_df = load_data("ktvic")

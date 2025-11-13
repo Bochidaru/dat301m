@@ -1,14 +1,6 @@
 from dataclasses import dataclass
 
 @dataclass
-class DataConfig:
-    dataset: str = "coco-vn"
-    coco2017_root: str = "/kaggle/input/coco-2017-dataset/coco2017"
-    coco_vn_caption_root: str = "/kaggle/input/vietnamese-coco-2017-image-caption-dataset"
-    ktvic_root: str = "/kaggle/input/ktvic-dataset"
-    val_ratio_by_image: float = 0.025 
-
-@dataclass
 class TokenizerConfig:
     t5_model_name: str = "VietAI/vit5-base"
     max_length: int = 35
