@@ -1,0 +1,10 @@
+sentencepiece
+timm
+transformers
+fastapi
+uvicorn
+python-multipart
+gtts
+pydub
+edge-tts
+google-genai
